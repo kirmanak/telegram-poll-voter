@@ -11,18 +11,25 @@ import (
 	"go.uber.org/zap"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 )
 
 type Client struct {
-	client         *telegram.Client
-	log            *zap.Logger
-	ctx            context.Context
-	cancel         context.CancelFunc
-	updatesManager *updates.Manager
-	messages_chan  chan tg.NotEmptyMessage
+	client          *telegram.Client
+	log             *zap.Logger
+	ctx             context.Context
+	cancel          context.CancelFunc
+	updatesManager  *updates.Manager
+	messages_chan   chan tg.NotEmptyMessage
+	target_chat_ids []int64
 }
 
 func NewClient() (*Client, error) {
+	target_chat_ids, err := getTargetChatIds()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get target chat ids: %w", err)
+	}
 	log, err := zap.NewDevelopment()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
@@ -42,12 +49,13 @@ func NewClient() (*Client, error) {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	return &Client{
-		client:         client,
-		log:            log.Named("client"),
-		ctx:            ctx,
-		cancel:         cancel,
-		updatesManager: updatesManager,
-		messages_chan:  messages_chan,
+		client:          client,
+		log:             log.Named("client"),
+		ctx:             ctx,
+		cancel:          cancel,
+		updatesManager:  updatesManager,
+		messages_chan:   messages_chan,
+		target_chat_ids: target_chat_ids,
 	}, nil
 }
 
@@ -133,7 +141,7 @@ func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
 		return
 	}
 	options := [][]byte{poll.GetAnswers()[0].GetOption()}
-	inputPeer, err := getInputPeer(msg.GetPeerID())
+	inputPeer, err := c.getInputPeer(msg.GetPeerID())
 	if err != nil {
 		c.log.Error("Failed to get input peer", zap.Error(err))
 		return
@@ -153,25 +161,27 @@ func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
 	}
 }
 
-func getInputPeer(peerClass tg.PeerClass) (tg.InputPeerClass, error) {
+func (c *Client) getInputPeer(peerClass tg.PeerClass) (tg.InputPeerClass, error) {
 	var inputPeer tg.InputPeerClass
-	switch peer := peerClass.(type) {
-	case *tg.PeerUser:
-		inputPeer = &tg.InputPeerUser{
-			UserID: peer.GetUserID(),
-		}
-	case *tg.PeerChat:
-		inputPeer = &tg.InputPeerChat{
-			ChatID: peer.GetChatID(),
-		}
-	case *tg.PeerChannel:
-		inputPeer = &tg.InputPeerChannel{
-			ChannelID: peer.GetChannelID(),
-		}
-	default:
-		return nil, fmt.Errorf("unknown peer type: %T", peerClass)
+	peer, ok := peerClass.(*tg.PeerChat)
+	if !ok {
+		return nil, fmt.Errorf("unsupported peer type: %T", peerClass)
 	}
+	chatId := peer.GetChatID()
+	if !c.isTargetChat(chatId) {
+		return nil, fmt.Errorf("chat %d is not in target chats", chatId)
+	}
+	inputPeer = &tg.InputPeerChat{ChatID: chatId}
 	return inputPeer, nil
+}
+
+func (c *Client) isTargetChat(chatId int64) bool {
+	for _, v := range c.target_chat_ids {
+		if v == chatId {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) printSelf() (*tg.User, error) {
@@ -230,4 +240,23 @@ func newUpdatesManager(log *zap.Logger, ch chan tg.NotEmptyMessage) *updates.Man
 		Handler: updateDispatcher,
 		Logger:  log.Named("updates"),
 	})
+}
+
+func getTargetChatIds() ([]int64, error) {
+	chatIds, ok := os.LookupEnv("TARGET_CHAT_IDS")
+	if !ok {
+		return nil, fmt.Errorf("TARGET_CHAT_IDS is not set")
+	}
+	target_chat_ids := make([]int64, 0, 2)
+	for _, chatId := range strings.Split(chatIds, ",") {
+		target_chat_id, err := strconv.ParseInt(chatId, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse chat id: %w", err)
+		}
+		target_chat_ids = append(target_chat_ids, target_chat_id)
+	}
+	if len(target_chat_ids) == 0 {
+		return nil, fmt.Errorf("no chat ids specified")
+	}
+	return target_chat_ids, nil
 }
