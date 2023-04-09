@@ -11,7 +11,6 @@ import (
 	"github.com/gotd/td/tg"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"golang.org/x/term"
 	"log"
 	"os"
 	"os/signal"
@@ -245,9 +244,10 @@ func (c *Client) checkAuth() error {
 		if !ok {
 			return fmt.Errorf("not authorized and PHONE env var is not set")
 		}
+		password := os.Getenv("PASSWORD")
 		c.log.Debug("Not authorized, starting auth flow with number", zap.String("phone", phone))
 		flow := auth.NewFlow(
-			termAuth{phone: phone},
+			termAuth{phone: phone, password: password},
 			auth.SendCodeOptions{},
 		)
 		if err := flow.Run(c.ctx, authClient); err != nil {
@@ -320,7 +320,8 @@ func (c noSignUp) AcceptTermsOfService(ctx context.Context, tos tg.HelpTermsOfSe
 type termAuth struct {
 	noSignUp
 
-	phone string
+	phone    string
+	password string
 }
 
 func (a termAuth) Phone(_ context.Context) (string, error) {
@@ -328,12 +329,7 @@ func (a termAuth) Phone(_ context.Context) (string, error) {
 }
 
 func (a termAuth) Password(_ context.Context) (string, error) {
-	fmt.Print("Enter 2FA password: ")
-	bytePwd, err := term.ReadPassword(0)
-	if err != nil {
-		return "", fmt.Errorf("failed to read password: %w", err)
-	}
-	return strings.TrimSpace(string(bytePwd)), nil
+	return a.password, nil
 }
 
 func (a termAuth) Code(_ context.Context, _ *tg.AuthSentCode) (string, error) {
