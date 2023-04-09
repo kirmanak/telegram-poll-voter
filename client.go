@@ -158,7 +158,8 @@ func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
 		c.log.Debug("Poll is a quiz")
 		return
 	}
-	options := [][]byte{poll.GetAnswers()[0].GetOption()}
+	answer := poll.GetAnswers()[0]
+	options := [][]byte{answer.GetOption()}
 	inputPeer, err := c.getInputPeer(msg.GetPeerID())
 	if err != nil {
 		c.log.Warn("Failed to get input peer", zap.Error(err))
@@ -169,6 +170,7 @@ func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
 		"input_peer", inputPeer,
 		"msg_id", msg.GetID(),
 		"options", options,
+		"option_text", answer.GetText(),
 	)
 	if _, err := c.client.API().MessagesSendVote(c.ctx, &tg.MessagesSendVoteRequest{
 		Peer:    inputPeer,
