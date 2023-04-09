@@ -1,22 +1,22 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
-	"log"
-	"os"
-	"os/signal"
-	"strconv"
-	"strings"
-
-	"bufio"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/updates"
 	updhook "github.com/gotd/td/telegram/updates/hook"
 	"github.com/gotd/td/tg"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"golang.org/x/term"
+	"log"
+	"os"
+	"os/signal"
+	"strconv"
+	"strings"
 )
 
 type Client struct {
@@ -41,7 +41,7 @@ func main() {
 }
 
 func NewClient() (*Client, error) {
-	log, err := zap.NewDevelopment()
+	log, err := buildLogger()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
@@ -180,7 +180,7 @@ func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
 		c.log.Warn("Failed to get input peer", zap.Error(err))
 		return
 	}
-	c.log.Sugar().Debugw(
+	c.log.Sugar().Infow(
 		"Sending vote",
 		"input_peer", inputPeer,
 		"msg_id", msg.GetID(),
@@ -294,6 +294,15 @@ func getTargetChatIds() ([]int64, error) {
 		return nil, fmt.Errorf("no chat ids specified")
 	}
 	return target_chat_ids, nil
+}
+
+func buildLogger() (*zap.Logger, error) {
+	loggerConf := zap.NewProductionConfig()
+	loggerEncoderConf := zap.NewProductionEncoderConfig()
+	loggerEncoderConf.EncodeTime = zapcore.ISO8601TimeEncoder
+	loggerConf.EncoderConfig = loggerEncoderConf
+	loggerConf.Encoding = "console"
+	return loggerConf.Build()
 }
 
 // noSignUp can be embedded to prevent signing up.
