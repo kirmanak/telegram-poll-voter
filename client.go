@@ -161,7 +161,7 @@ func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
 	options := [][]byte{poll.GetAnswers()[0].GetOption()}
 	inputPeer, err := c.getInputPeer(msg.GetPeerID())
 	if err != nil {
-		c.log.Error("Failed to get input peer", zap.Error(err))
+		c.log.Warn("Failed to get input peer", zap.Error(err))
 		return
 	}
 	c.log.Sugar().Debugw(
