@@ -19,6 +19,7 @@ type Client struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	updatesManager *updates.Manager
+	messages_chan  chan tg.NotEmptyMessage
 }
 
 func NewClient() (*Client, error) {
@@ -26,7 +27,8 @@ func NewClient() (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
-	updatesManager := newUpdatesManager(log)
+	messages_chan := make(chan tg.NotEmptyMessage)
+	updatesManager := newUpdatesManager(log, messages_chan)
 	options := telegram.Options{
 		Logger:        log.Named("telegram"),
 		UpdateHandler: updatesManager,
@@ -45,6 +47,7 @@ func NewClient() (*Client, error) {
 		ctx:            ctx,
 		cancel:         cancel,
 		updatesManager: updatesManager,
+		messages_chan:  messages_chan,
 	}, nil
 }
 
@@ -76,8 +79,15 @@ func (c *Client) onClientConnected() error {
 			c.log.Error("Failed to stop updates manager", zap.Error(err))
 		}
 	}()
-	<-c.ctx.Done()
-	return c.ctx.Err()
+	for {
+		select {
+		case <-c.ctx.Done():
+			c.log.Info("Context done")
+			return c.ctx.Err()
+		case message := <-c.messages_chan:
+			c.log.Info("Got message", zap.Any("message", message))
+		}
+	}
 }
 
 func (c *Client) printSelf() (*tg.User, error) {
@@ -120,10 +130,16 @@ func (c *Client) checkAuth() error {
 	return nil
 }
 
-func newUpdatesManager(log *zap.Logger) *updates.Manager {
+func newUpdatesManager(log *zap.Logger, ch chan tg.NotEmptyMessage) *updates.Manager {
 	updateDispatcher := tg.NewUpdateDispatcher()
-	updateDispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, update *tg.UpdateNewChannelMessage) error {
-		log.Info("New channel message", zap.Any("message", update.Message))
+	updateLogger := log.Named("updateListener")
+	updateDispatcher.OnNewMessage(func(ctx context.Context, e tg.Entities, update *tg.UpdateNewMessage) error {
+		updateLogger.Info("New message", zap.Any("update.message", update.GetMessage()), zap.Any("entities", e))
+		nonempty, ok := update.Message.AsNotEmpty()
+		if ok {
+			updateLogger.Info("New non-empty message", zap.Any("nonEmpty", nonempty))
+			ch <- nonempty
+		}
 		return nil
 	})
 	return updates.New(updates.Config{
