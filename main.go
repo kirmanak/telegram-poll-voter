@@ -40,7 +40,8 @@ func main() {
 }
 
 func NewClient() (*Client, error) {
-	log, err := buildLogger()
+	_, is_debug := os.LookupEnv("DEBUG")
+	log, err := buildLogger(is_debug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
 	}
@@ -296,12 +297,18 @@ func getTargetChatIds() ([]int64, error) {
 	return target_chat_ids, nil
 }
 
-func buildLogger() (*zap.Logger, error) {
-	loggerConf := zap.NewProductionConfig()
-	loggerEncoderConf := zap.NewProductionEncoderConfig()
-	loggerEncoderConf.EncodeTime = zapcore.ISO8601TimeEncoder
-	loggerConf.EncoderConfig = loggerEncoderConf
-	loggerConf.Encoding = "console"
+func buildLogger(is_debug bool) (*zap.Logger, error) {
+	var loggerConf zap.Config
+	if is_debug {
+		loggerConf = zap.NewDevelopmentConfig()
+	} else {
+		loggerConf = zap.NewProductionConfig()
+		loggerConf := zap.NewProductionConfig()
+		loggerEncoderConf := zap.NewProductionEncoderConfig()
+		loggerEncoderConf.EncodeTime = zapcore.ISO8601TimeEncoder
+		loggerConf.EncoderConfig = loggerEncoderConf
+		loggerConf.Encoding = "console"
+	}
 	return loggerConf.Build()
 }
 
