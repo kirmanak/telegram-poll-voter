@@ -187,12 +187,16 @@ func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
 		"options", options,
 		"option_text", answer.GetText(),
 	)
-	if _, err := c.client.API().MessagesSendVote(c.ctx, &tg.MessagesSendVoteRequest{
-		Peer:    inputPeer,
-		MsgID:   msg.GetID(),
-		Options: options,
-	}); err != nil {
-		c.log.Error("Failed to send vote", zap.Error(err))
+	for i := 0; i < 5; i++ {
+		if _, err := c.client.API().MessagesSendVote(c.ctx, &tg.MessagesSendVoteRequest{
+			Peer:    inputPeer,
+			MsgID:   msg.GetID(),
+			Options: options,
+		}); err != nil {
+			c.log.Error("Failed to send vote", zap.Error(err))
+		} else {
+			break
+		}
 	}
 }
 
