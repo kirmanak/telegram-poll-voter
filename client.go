@@ -26,13 +26,13 @@ type Client struct {
 }
 
 func NewClient() (*Client, error) {
-	target_chat_ids, err := getTargetChatIds()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get target chat ids: %w", err)
-	}
 	log, err := zap.NewDevelopment()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
+	}
+	target_chat_ids, err := getTargetChatIds()
+	if err != nil {
+		log.Warn("failed to get target chat ids", zap.Error(err))
 	}
 	messages_chan := make(chan tg.NotEmptyMessage)
 	updatesManager := newUpdatesManager(log, messages_chan)
@@ -79,6 +79,9 @@ func (c *Client) onClientConnected() error {
 	if err != nil {
 		return fmt.Errorf("failed to print self: %w", err)
 	}
+	if c.target_chat_ids == nil {
+		return c.printAllChats()
+	}
 	if err := c.updatesManager.Auth(c.ctx, c.client.API(), self.ID, self.Bot, true); err != nil {
 		return fmt.Errorf("failed to auth updates manager: %w", err)
 	}
@@ -96,6 +99,21 @@ func (c *Client) onClientConnected() error {
 			c.onNotEmptyMessage(message)
 		}
 	}
+}
+
+func (c *Client) printAllChats() error {
+	exceptIds := make([]int64, 0)
+	chats, err := c.client.API().MessagesGetAllChats(c.ctx, exceptIds)
+	if err != nil {
+		return fmt.Errorf("failed to get chats: %w", err)
+	}
+	for _, chatClass := range chats.GetChats() {
+		if chat, ok := chatClass.AsNotEmpty(); ok {
+			c.log.Info("Chat", zap.Any("name", chat.GetTitle()), zap.Any("id", chat.GetID()))
+		}
+	}
+	c.log.Info("Please, specify TARGET_CHAT_IDS env variable with a list of chat ids separated by comma")
+	return nil
 }
 
 func (c *Client) onNotEmptyMessage(message tg.NotEmptyMessage) {
