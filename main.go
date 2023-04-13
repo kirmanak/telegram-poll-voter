@@ -307,7 +307,6 @@ func buildLogger(is_debug bool) (*zap.Logger, error) {
 		loggerConf = zap.NewDevelopmentConfig()
 	} else {
 		loggerConf = zap.NewProductionConfig()
-		loggerConf := zap.NewProductionConfig()
 		loggerEncoderConf := zap.NewProductionEncoderConfig()
 		loggerEncoderConf.EncodeTime = zapcore.ISO8601TimeEncoder
 		loggerConf.EncoderConfig = loggerEncoderConf
