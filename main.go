@@ -201,17 +201,28 @@ func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
 }
 
 func (c *Client) getInputPeer(peerClass tg.PeerClass) (tg.InputPeerClass, error) {
-	var inputPeer tg.InputPeerClass
-	peer, ok := peerClass.(*tg.PeerChat)
-	if !ok {
+	switch peer := peerClass.(type) {
+	case *tg.PeerUser:
+		userId := peer.GetUserID()
+		if !c.isTargetChat(userId) {
+			return nil, fmt.Errorf("user %d is not in target chats", userId)
+		}
+		return &tg.InputPeerUser{UserID: userId}, nil
+	case *tg.PeerChat:
+		chatId := peer.GetChatID()
+		if !c.isTargetChat(chatId) {
+			return nil, fmt.Errorf("chat %d is not in target chats", chatId)
+		}
+		return &tg.InputPeerChat{ChatID: chatId}, nil
+	case *tg.PeerChannel:
+		channelId := peer.GetChannelID()
+		if !c.isTargetChat(channelId) {
+			return nil, fmt.Errorf("channel %d is not in target chats", channelId)
+		}
+		return &tg.InputPeerChannel{ChannelID: channelId}, nil
+	default:
 		return nil, fmt.Errorf("unsupported peer type: %T", peerClass)
 	}
-	chatId := peer.GetChatID()
-	if !c.isTargetChat(chatId) {
-		return nil, fmt.Errorf("chat %d is not in target chats", chatId)
-	}
-	inputPeer = &tg.InputPeerChat{ChatID: chatId}
-	return inputPeer, nil
 }
 
 func (c *Client) isTargetChat(chatId int64) bool {
@@ -272,6 +283,24 @@ func newUpdatesManager(log *zap.Logger, ch chan tg.NotEmptyMessage) *updates.Man
 		nonempty, ok := update.Message.AsNotEmpty()
 		if ok {
 			updateLogger.Debug("New non-empty message", zap.Any("nonEmpty", nonempty))
+			ch <- nonempty
+		}
+		return nil
+	})
+	updateDispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, update *tg.UpdateNewChannelMessage) error {
+		updateLogger.Debug("New channel message", zap.Any("update.message", update.GetMessage()), zap.Any("entities", e))
+		nonempty, ok := update.Message.AsNotEmpty()
+		if ok {
+			updateLogger.Debug("New non-empty channel message", zap.Any("nonEmpty", nonempty))
+			ch <- nonempty
+		}
+		return nil
+	})
+	updateDispatcher.OnNewScheduledMessage(func(ctx context.Context, e tg.Entities, update *tg.UpdateNewScheduledMessage) error {
+		updateLogger.Debug("New scheduled message", zap.Any("update.message", update.GetMessage()), zap.Any("entities", e))
+		nonempty, ok := update.Message.AsNotEmpty()
+		if ok {
+			updateLogger.Debug("New non-empty scheduled message", zap.Any("nonEmpty", nonempty))
 			ch <- nonempty
 		}
 		return nil
