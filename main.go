@@ -86,7 +86,7 @@ func (c *Client) Run() error {
 }
 
 func (c *Client) onClientConnected() error {
-	c.log.Debug("Connected")
+	c.log.Info("Connected")
 	if err := c.checkAuth(); err != nil {
 		return fmt.Errorf("failed to check auth: %w", err)
 	}
@@ -108,7 +108,7 @@ func (c *Client) onClientConnected() error {
 	for {
 		select {
 		case <-c.ctx.Done():
-			c.log.Debug("Context done")
+			c.log.Info("Context done")
 			return c.ctx.Err()
 		case message := <-c.messages_chan:
 			c.onNotEmptyMessage(message)
@@ -135,42 +135,42 @@ func (c *Client) onNotEmptyMessage(message tg.NotEmptyMessage) {
 	c.log.Debug("Got message", zap.Any("message", message))
 	msg, ok := message.(*tg.Message)
 	if !ok {
-		c.log.Debug("Not a message")
+		c.log.Warn("Not a message")
 		return
 	}
 	media, ok := msg.GetMedia()
 	if !ok {
-		c.log.Debug("Not a media")
+		c.log.Debug("No media found")
 		return
 	}
 	poll, ok := media.(*tg.MessageMediaPoll)
 	if !ok {
-		c.log.Debug("Not a poll")
+		c.log.Debug("No poll found")
 		return
 	}
 	c.onPollReceived(poll.Poll, message)
 }
 
 func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
-	c.log.Debug("Got poll", zap.Any("poll", poll))
+	c.log.Info("Got poll", zap.Any("poll", poll), zap.Any("msg", msg))
 	if len(poll.GetAnswers()) != 2 {
-		c.log.Debug("Not a 2 answers poll")
+		c.log.Info("Not a 2 answers poll")
 		return
 	}
 	if poll.GetClosed() {
-		c.log.Debug("Poll is closed")
+		c.log.Info("Poll is closed")
 		return
 	}
 	if poll.GetMultipleChoice() {
-		c.log.Debug("Poll is multiple choice")
+		c.log.Info("Poll is multiple choice")
 		return
 	}
 	if !poll.GetPublicVoters() {
-		c.log.Debug("Poll is anonymous")
+		c.log.Info("Poll is anonymous")
 		return
 	}
 	if poll.GetQuiz() {
-		c.log.Debug("Poll is a quiz")
+		c.log.Info("Poll is a quiz")
 		return
 	}
 	answer := poll.GetAnswers()[0]
@@ -250,7 +250,7 @@ func (c *Client) checkAuth() error {
 			return fmt.Errorf("not authorized and PHONE env var is not set")
 		}
 		password := os.Getenv("PASSWORD")
-		c.log.Debug("Not authorized, starting auth flow with number", zap.String("phone", phone))
+		c.log.Info("Not authorized, starting auth flow with number", zap.String("phone", phone))
 		flow := auth.NewFlow(
 			termAuth{phone: phone, password: password},
 			auth.SendCodeOptions{},
@@ -259,7 +259,7 @@ func (c *Client) checkAuth() error {
 			return fmt.Errorf("failed to run auth flow: %w", err)
 		}
 	} else {
-		c.log.Debug("Already authorized")
+		c.log.Info("Already authorized")
 	}
 	return nil
 }
