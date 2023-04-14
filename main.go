@@ -24,7 +24,7 @@ type Client struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	updatesManager  *updates.Manager
-	messages_chan   chan tg.NotEmptyMessage
+	messages_chan   chan *NewMessage
 	target_chat_ids []int64
 }
 
@@ -49,7 +49,7 @@ func NewClient() (*Client, error) {
 	if err != nil {
 		log.Warn("failed to get target chat ids", zap.Error(err))
 	}
-	messages_chan := make(chan tg.NotEmptyMessage)
+	messages_chan := make(chan *NewMessage)
 	updatesManager := newUpdatesManager(log, messages_chan)
 	options := telegram.Options{
 		Logger:        log.Named("telegram"),
@@ -131,9 +131,9 @@ func (c *Client) printAllChats() error {
 	return nil
 }
 
-func (c *Client) onNotEmptyMessage(message tg.NotEmptyMessage) {
-	c.log.Debug("Got message", zap.Any("message", message))
-	msg, ok := message.(*tg.Message)
+func (c *Client) onNotEmptyMessage(newMessage *NewMessage) {
+	c.log.Debug("Got message", zap.Any("message", newMessage))
+	msg, ok := (*newMessage.Message).(*tg.Message)
 	if !ok {
 		c.log.Warn("Not a message")
 		return
@@ -148,11 +148,11 @@ func (c *Client) onNotEmptyMessage(message tg.NotEmptyMessage) {
 		c.log.Debug("No poll found")
 		return
 	}
-	c.onPollReceived(poll.Poll, message)
+	c.onPollReceived(poll.Poll, msg, newMessage)
 }
 
-func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
-	c.log.Info("Got poll", zap.Any("poll", poll), zap.Any("msg", msg))
+func (c *Client) onPollReceived(poll tg.Poll, msg *tg.Message, newMessage *NewMessage) {
+	c.log.Info("Got poll", zap.Any("poll", poll), zap.Any("msg", msg), zap.Any("newMessage", newMessage))
 	if len(poll.GetAnswers()) != 2 {
 		c.log.Info("Not a 2 answers poll")
 		return
@@ -175,7 +175,7 @@ func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
 	}
 	answer := poll.GetAnswers()[0]
 	options := [][]byte{answer.GetOption()}
-	inputPeer, err := c.getInputPeer(msg.GetPeerID())
+	inputPeer, err := c.getInputPeer(msg.GetPeerID(), newMessage)
 	if err != nil {
 		c.log.Warn("Failed to get input peer", zap.Error(err))
 		return
@@ -200,26 +200,38 @@ func (c *Client) onPollReceived(poll tg.Poll, msg tg.NotEmptyMessage) {
 	}
 }
 
-func (c *Client) getInputPeer(peerClass tg.PeerClass) (tg.InputPeerClass, error) {
+func (c *Client) getInputPeer(peerClass tg.PeerClass, newMessage *NewMessage) (tg.InputPeerClass, error) {
 	switch peer := peerClass.(type) {
 	case *tg.PeerUser:
 		userId := peer.GetUserID()
 		if !c.isTargetChat(userId) {
 			return nil, fmt.Errorf("user %d is not in target chats", userId)
 		}
-		return &tg.InputPeerUser{UserID: userId}, nil
+		user, ok := newMessage.Entities.Users[userId]
+		if !ok {
+			return nil, fmt.Errorf("user %d is not in the list of entities", userId)
+		}
+		return user.AsInputPeer(), nil
 	case *tg.PeerChat:
 		chatId := peer.GetChatID()
 		if !c.isTargetChat(chatId) {
 			return nil, fmt.Errorf("chat %d is not in target chats", chatId)
 		}
-		return &tg.InputPeerChat{ChatID: chatId}, nil
+		chat, ok := newMessage.Entities.Chats[chatId]
+		if !ok {
+			return nil, fmt.Errorf("chat %d is not in the list of entities", chatId)
+		}
+		return chat.AsInputPeer(), nil
 	case *tg.PeerChannel:
 		channelId := peer.GetChannelID()
 		if !c.isTargetChat(channelId) {
 			return nil, fmt.Errorf("channel %d is not in target chats", channelId)
 		}
-		return &tg.InputPeerChannel{ChannelID: channelId}, nil
+		channel, ok := newMessage.Entities.Channels[channelId]
+		if !ok {
+			return nil, fmt.Errorf("channel %d is not in the list of entities", channelId)
+		}
+		return channel.AsInputPeer(), nil
 	default:
 		return nil, fmt.Errorf("unsupported peer type: %T", peerClass)
 	}
@@ -275,34 +287,22 @@ func (c *Client) checkAuth() error {
 	return nil
 }
 
-func newUpdatesManager(log *zap.Logger, ch chan tg.NotEmptyMessage) *updates.Manager {
+func newUpdatesManager(log *zap.Logger, ch chan *NewMessage) *updates.Manager {
 	updateDispatcher := tg.NewUpdateDispatcher()
 	updateLogger := log.Named("updateListener")
 	updateDispatcher.OnNewMessage(func(ctx context.Context, e tg.Entities, update *tg.UpdateNewMessage) error {
-		updateLogger.Debug("New message", zap.Any("update.message", update.GetMessage()), zap.Any("entities", e))
-		nonempty, ok := update.Message.AsNotEmpty()
-		if ok {
-			updateLogger.Debug("New non-empty message", zap.Any("nonEmpty", nonempty))
-			ch <- nonempty
-		}
+		updateLogger.Debug("New message", zap.Any("update", update), zap.Any("entities", e))
+		ch <- &NewMessage{Message: &update.Message, Entities: &e}
 		return nil
 	})
 	updateDispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, update *tg.UpdateNewChannelMessage) error {
-		updateLogger.Debug("New channel message", zap.Any("update.message", update.GetMessage()), zap.Any("entities", e))
-		nonempty, ok := update.Message.AsNotEmpty()
-		if ok {
-			updateLogger.Debug("New non-empty channel message", zap.Any("nonEmpty", nonempty))
-			ch <- nonempty
-		}
+		updateLogger.Debug("New channel message", zap.Any("update", update), zap.Any("entities", e))
+		ch <- &NewMessage{Message: &update.Message, Entities: &e}
 		return nil
 	})
 	updateDispatcher.OnNewScheduledMessage(func(ctx context.Context, e tg.Entities, update *tg.UpdateNewScheduledMessage) error {
-		updateLogger.Debug("New scheduled message", zap.Any("update.message", update.GetMessage()), zap.Any("entities", e))
-		nonempty, ok := update.Message.AsNotEmpty()
-		if ok {
-			updateLogger.Debug("New non-empty scheduled message", zap.Any("nonEmpty", nonempty))
-			ch <- nonempty
-		}
+		updateLogger.Debug("New scheduled message", zap.Any("update", update), zap.Any("entities", e))
+		ch <- &NewMessage{Message: &update.Message, Entities: &e}
 		return nil
 	})
 	return updates.New(updates.Config{
@@ -378,4 +378,9 @@ func (a termAuth) Code(_ context.Context, _ *tg.AuthSentCode) (string, error) {
 		return "", fmt.Errorf("failed to read code: %w", err)
 	}
 	return strings.TrimSpace(code), nil
+}
+
+type NewMessage struct {
+	Message  *tg.MessageClass
+	Entities *tg.Entities
 }
