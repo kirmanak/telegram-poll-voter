@@ -1,12 +1,15 @@
-FROM golang:1.20 AS build
+FROM  --platform=${BUILDPLATFORM} golang:1.20 AS build
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /app
 
 COPY go.mod go.sum main.go ./
 
-RUN go build -o /voter
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /voter
 
-FROM gcr.io/distroless/base-debian10
+FROM --platform=${TARGETPLATFORM} gcr.io/distroless/base-debian10
 
 WORKDIR /app
 
